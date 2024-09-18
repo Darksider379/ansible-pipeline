@@ -1,0 +1,141 @@
+name: Ansible CI/CD pipeline
+
+on:
+  workflow_call:
+    inputs:
+      DB_NAME:
+        required: true
+        type: string
+      DB_INSTANCE_NAME:
+        required: true
+        type: string
+      DB_HOST:
+        required: true
+        type: string
+      DB_USER:
+        required: true
+        type: string
+      GCP_PROJECT:
+        required: true
+        type: string
+      SCRIPT_PATH:
+        required: true
+        type: string
+      DB_INSTANCE_LOCATION:
+        required: true
+        type: string
+        
+
+env: 
+  DB_INSTANCE_NAME: ${{ inputs.DB_INSTANCE_NAME }}
+  DB_NAME: ${{ inputs.DB_NAME }}
+  DB_HOST: ${{ inputs.DB_HOST }}
+  DB_USER: ${{ inputs.DB_USER }}
+  DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+  GCP_PROJECT: ${{ inputs.GCP_PROJECT }}
+  TOKEN_KEY: ${{ secrets.GH_PAT }}
+  SCRIPT_PATH: ${{ inputs.SCRIPT_PATH }}
+  DB_INSTANCE_LOCATION: ${{ inputs.DB_INSTANCE_LOCATION }}
+  WORKLOAD_IDENTITY_PROVIDER: ${{ vars.DEV_WORKLOAD_IDENTITY_PROVIDER }}
+  SERVICE_ACCOUNT: ${{ vars.DEV_SERVICE_ACCOUNT }}
+
+
+jobs:
+  data-prep:
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    runs-on: ["self-hosted"]
+    if: always()
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v3
+
+      - id: 'auth'
+        uses: 'google-github-actions/auth@v1'
+        with:
+          token_format: 'access_token'
+          workload_identity_provider: '${{ env.WORKLOAD_IDENTITY_PROVIDER }}'
+          service_account: '${{ env.SERVICE_ACCOUNT }}'
+          project_id: '${{ env.GCP_PROJECT }}'
+
+      - name: 'Setup Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v1'
+
+      - name: 'Create Temporary storage bucket'
+        run: |
+          gcloud config set project ${{ env.GCP_PROJECT }}
+          gcloud storage buckets create gs://${{ github.sha }} 
+
+      - name: Copy Artifacts to bucket
+        run: |
+          sudo gsutil -m cp -r . gs://${{ github.sha }}
+
+  playbook-execution:
+    needs: ["data-prep"]
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    runs-on: ["self-hosted"]
+    if: always()
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v3
+        with:
+          repository: Darksider379/ansible-playbooks
+          ref: refs/heads/master
+          token: ${{ env.TOKEN_KEY }}
+
+      - id: 'auth'
+        uses: 'google-github-actions/auth@v1'
+        with:
+          token_format: 'access_token'
+          workload_identity_provider: '${{ env.WORKLOAD_IDENTITY_PROVIDER }}'
+          service_account: '${{ env.SERVICE_ACCOUNT }}'
+          project_id: '${{ env.GCP_PROJECT }}'
+
+      - name: 'Setup Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v1'
+
+
+      - name: Download artifacts from bucket
+        run: |
+          gcloud config set project ${{ env.GCP_PROJECT }}
+          sudo gsutil -m cp -r gs://${{ github.sha }}/* .
+
+      - name: 'Setup Ansible'
+        run: |
+          sudo apt update
+          sudo apt install -y software-properties-common
+          sudo add-apt-repository --yes --update ppa:ansible/ansible
+          sudo apt install -y ansible
+
+      - name: 'Which python'
+        run: |
+          which python3
+          which ansible-playbook
+          ansible-playbook --version
+
+      - name: 'Setup Ansible collection'
+        run: |
+          ansible-galaxy collection install community.postgresql
+
+      - name: 'Check if proxy is running'
+        run: |
+          ps -ef | grep "proxy" | head
+
+      - name: 'Run ansible playbook'
+        run: |
+          ansible-playbook postgres-deployment.yaml -e db_instance_name="${{ env.DB_INSTANCE_NAME }}" -e db_instance_location="${{ env.DB_INSTANCE_LOCATION }}" -e gcp_project="${{ env.GCP_PROJECT }}" -e db_name="${{ env.DB_NAME }}" -e ansible_host="${{ env.DB_HOST }}" -e db_user="${{ env.DB_USER }}" -e db_password="${{ env.DB_PASSWORD }}"
+
+      - name: 'Stop cloudSQL proxy'
+        run: |
+          pid=$(ps -ef | grep "proxy" | head -1 | awk -F" " '{print $2}')
+          sudo kill -9 "$pid"
+          exit 0;
+          
+      - name: Delete storage bucket
+        if: always()
+        run: |
+          gcloud config set project ${{ env.GCP_PROJECT}}
+          gcloud storage rm -r gs://${{ github.sha }}
