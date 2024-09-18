@@ -36,8 +36,8 @@ env:
   TOKEN_KEY: ${{ secrets.GH_PAT }}
   SCRIPT_PATH: ${{ inputs.SCRIPT_PATH }}
   DB_INSTANCE_LOCATION: ${{ inputs.DB_INSTANCE_LOCATION }}
-  WORKLOAD_IDENTITY_PROVIDER: ${{ vars.DEV_WORKLOAD_IDENTITY_PROVIDER }}
-  SERVICE_ACCOUNT: ${{ vars.DEV_SERVICE_ACCOUNT }}
+  WORKLOAD_IDENTITY_PROVIDER: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+  SERVICE_ACCOUNT: ${{ vars.SERVICE_ACCOUNT }}
 
 
 jobs:
@@ -126,7 +126,7 @@ jobs:
 
       - name: 'Run ansible playbook'
         run: |
-          ansible-playbook postgres-deployment.yaml -e db_instance_name="${{ env.DB_INSTANCE_NAME }}" -e db_instance_location="${{ env.DB_INSTANCE_LOCATION }}" -e gcp_project="${{ env.GCP_PROJECT }}" -e db_name="${{ env.DB_NAME }}" -e ansible_host="${{ env.DB_HOST }}" -e db_user="${{ env.DB_USER }}" -e db_password="${{ env.DB_PASSWORD }}"
+          ansible-playbook postgres-deployment.yaml -e db_instance_name="${{ env.DB_INSTANCE_NAME }}" -e db_instance_location="${{ env.DB_INSTANCE_LOCATION }}" -e gcp_project="${{ env.GCP_PROJECT }}" -e db_name="${{ env.DB_NAME }}" -e ansible_host="${{ env.DB_HOST }}" -e db_user="${{ env.DB_USER }}" -e db_password="${{ env.DB_PASSWORD }}" -e service_account="${{ env.SERVICE_ACCOUNT }}"
 
       - name: 'Stop cloudSQL proxy'
         run: |
